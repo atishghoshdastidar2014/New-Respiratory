@@ -1,0 +1,221 @@
+import requests
+from bs4 import BeautifulSoup
+import re
+from urllib.parse import urlparse
+
+
+# =========================================
+# 🔷 1. INTENT ENGINE (DOMAIN AGNOSTIC)
+# =========================================
+class IntentEngine:
+    def parse(self, query):
+        query = query.lower()
+
+        keywords = [
+            "restaurant", "cafe", "coffee", "food",
+            "clothing", "lingerie", "fashion",
+            "electronics", "hospital", "salon",
+            "gym", "pharmacy", "store", "shop"
+        ]
+
+        category = "business/service"
+
+        for k in keywords:
+            if k in query:
+                category = k + " store" if "store" not in k else k
+                break
+
+        return {"category": category, "query": query}
+
+
+# =========================================
+# 🔷 2. GEO RESOLVER
+# =========================================
+class GeoResolver:
+    def resolve(self, query):
+        match = re.search(r'in ([a-zA-Z\s,]+)', query.lower())
+        if match:
+            return match.group(1).title()
+
+        try:
+            res = requests.get("https://ipinfo.io/json", timeout=3)
+            data = res.json()
+            city = data.get("city", "")
+            region = data.get("region", "")
+            return f"{city}, {region}" if city else "Global"
+        except:
+            return "Global"
+
+
+# =========================================
+# 🔷 3. QUERY EXPANDER (UNIVERSAL)
+# =========================================
+class QueryExpander:
+    def expand(self, category, location):
+        base = f"{category} in {location}"
+
+        return list(set([
+            base,
+            f"best {base}",
+            f"top rated {base}",
+            f"{category} near {location}",
+            f"{category} services in {location}"
+        ]))
+
+
+# =========================================
+# 🔷 4. SEARCH ENGINE (SAFE STRUCTURE)
+# =========================================
+class SearchEngine:
+    def search(self, queries):
+        headers = {"User-Agent": "Mozilla/5.0"}
+        results = []
+
+        for q in queries:
+            url = f"https://html.duckduckgo.com/html/?q={q}"
+
+            try:
+                res = requests.get(url, headers=headers, timeout=5)
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                for a in soup.find_all("a", href=True)[:10]:
+                    href = a["href"]
+                    text = a.text.strip()
+
+                    if "http" in href and len(text) > 3:
+                        results.append({
+                            "name": text,
+                            "url": href,
+                            "score": 0.5  # ✅ DEFAULT SCORE ALWAYS PRESENT
+                        })
+
+            except:
+                continue
+
+        return results
+
+
+# =========================================
+# 🔷 5. URL VALIDATOR (UPDATES SCORE)
+# =========================================
+class URLValidator:
+    def validate(self, results):
+        for r in results:
+            try:
+                domain = urlparse(r["url"]).netloc
+
+                if any(x in domain for x in ["google", "facebook", "instagram"]):
+                    r["score"] += 0.2
+                elif any(x in domain for x in ["justdial", "yelp", "tripadvisor"]):
+                    r["score"] += 0.3
+                else:
+                    r["score"] += 0.5
+
+            except:
+                r["score"] = 0.3  # fallback safe score
+
+        return results
+
+
+# =========================================
+# 🔷 6. CONTENT EXTRACTOR (GENERIC)
+# =========================================
+class Extractor:
+    def extract(self, url):
+        try:
+            res = requests.get(url, timeout=3)
+            text = res.text.lower()
+
+            keywords = [
+                "sale", "discount", "delivery",
+                "online", "booking", "shop",
+                "product", "service", "appointment"
+            ]
+
+            found = [k for k in keywords if k in text]
+
+            return list(set(found)) if found else ["general service"]
+
+        except:
+            return ["unknown"]
+
+
+# =========================================
+# 🔷 7. RANKER (SAFE SORT)
+# =========================================
+class Ranker:
+    def rank(self, results):
+        return sorted(results, key=lambda x: x.get("score", 0), reverse=True)[:7]
+
+
+# =========================================
+# 🔷 8. MEMORY (OPTIONAL RAG)
+# =========================================
+class Memory:
+    def __init__(self):
+        self.data = []
+
+    def add(self, item):
+        self.data.append(item)
+
+    def get_all(self):
+        return self.data
+
+
+# =========================================
+# 🔷 9. MAIN SYSTEM
+# =========================================
+class UniversalGeoSystem:
+    def __init__(self):
+        self.intent = IntentEngine()
+        self.geo = GeoResolver()
+        self.expander = QueryExpander()
+        self.search = SearchEngine()
+        self.validator = URLValidator()
+        self.extractor = Extractor()
+        self.ranker = Ranker()
+        self.memory = Memory()
+
+    def run(self, query):
+        intent = self.intent.parse(query)
+        location = self.geo.resolve(query)
+
+        queries = self.expander.expand(intent["category"], location)
+
+        raw_results = self.search.search(queries)
+        validated = self.validator.validate(raw_results)
+
+        final_results = []
+
+        for r in validated:
+            services = self.extractor.extract(r["url"])
+
+            result = {
+                "name": r.get("name", "Unknown"),
+                "url": r.get("url", ""),
+                "services": services,
+                "confidence": round(r.get("score", 0.5), 2),
+                "location": location,
+                "category": intent["category"]
+            }
+
+            final_results.append(result)
+            self.memory.add(result)
+
+        return self.ranker.rank(final_results)
+
+
+# =========================================
+# 🔷 RUN SYSTEM
+# =========================================
+if __name__ == "__main__":
+    system = UniversalGeoSystem()
+
+    query = input("Enter your query: ")
+    results = system.run(query)
+
+    print("\n🔷 RESULTS:\n")
+    for r in results:
+        print(r)
+
+    print("\n✅ System Ready for ANY Domain (Food, Fashion, Medical, Services)")
